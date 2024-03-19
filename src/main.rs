@@ -2,6 +2,7 @@ use chumsky::Parser;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 
+mod div;
 mod expr;
 
 fn main() -> color_eyre::Result<()> {
@@ -24,7 +25,14 @@ fn main() -> color_eyre::Result<()> {
 
                 let value = exp.eval();
 
-                println!("{value}");
+                match value {
+                    Ok(value) => {
+                        println!("{value}");
+                    }
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                    }
+                }
             }
             Err(ReadlineError::Interrupted | ReadlineError::Eof) => {
                 break;
