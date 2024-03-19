@@ -1,6 +1,8 @@
 use bigdecimal::BigDecimal;
 
 // TODO: this is quite imprecise
+//
+// https://math.stackexchange.com/questions/1344627/how-to-use-chebyshev-polynomials-to-approximate-sinx-and-cosx-within-t
 pub fn sin(mut x: BigDecimal) -> BigDecimal {
     // -x^2
     let sq = -(&x * &x);
