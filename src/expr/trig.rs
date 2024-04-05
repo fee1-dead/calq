@@ -95,8 +95,6 @@ fn cos_restricted(x: BigDecimal) -> BigDecimal {
     out
 }
 
-// TODO: this is quite imprecise
-//
 // https://en.wikipedia.org/wiki/List_of_trigonometric_identities
 pub fn sin(mut x: BigDecimal) -> BigDecimal {
     let mut was_negative = x.is_negative();
