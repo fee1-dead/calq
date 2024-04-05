@@ -1,3 +1,4 @@
+#![feature(lazy_cell)]
 use chumsky::Parser;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;

@@ -142,7 +142,7 @@ impl Expr {
                         _ => todo!(),
                     }
                 }
-                _ => todo!()
+                _ => todo!(),
             },
         })
     }
@@ -185,10 +185,10 @@ pub fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> {
 
         let op = |c| just(c).padded();
 
-        let func = atom.clone()
+        let func = atom
+            .clone()
             .then(
-                expr
-                    .separated_by(just(','))
+                expr.separated_by(just(','))
                     .allow_trailing() // Foo is Rust-like, so allow trailing commas to appear in arg lists
                     .delimited_by(just('('), just(')')),
             )
