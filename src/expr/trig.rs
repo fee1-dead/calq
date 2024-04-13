@@ -12,6 +12,8 @@ macro_rules! lazy_constant {
     };
 }
 
+// http://www.hvks.com/Numerical/papers.html
+
 // `N[Pi,100]` on wolfram cloud.
 lazy_constant!(static PI = "3"."141592653589793238462643383279502884197169399375105820974944592307816406286208998628034825342117068");
 
@@ -41,7 +43,7 @@ macro_rules! coeff_list {
 
 // https://math.stackexchange.com/questions/1344627/how-to-use-chebyshev-polynomials-to-approximate-sinx-and-cosx-within-t
 
-/// Using Chebychev polynomials to compute sin in the domain [0, Pi/2] 
+/// Using Chebychev polynomials to compute sin in the domain [0, Pi/2]
 /// Code: `AccountingForm[CoefficientList[N[-D[BesselJ[0,1]+2Sum[(-1)^n BesselJ[2n,1]ChebyshevT[2n,x],{n,10}],x]//Expand,20],x][[2;;;;2]],NumberSigns->{"-", ""}]`
 fn sin_restricted(x: BigDecimal) -> BigDecimal {
     // list of coefficients for x^1, x^3, x^5, so on
@@ -104,7 +106,9 @@ pub fn sin(mut x: BigDecimal) -> BigDecimal {
     }
 
     // find out how many multiples of pi this has
-    let (multiples_of_pi, exp) = (&x / &*PI).with_scale_round(0, RoundingMode::Down).into_bigint_and_exponent();
+    let (multiples_of_pi, exp) = (&x / &*PI)
+        .with_scale_round(0, RoundingMode::Down)
+        .into_bigint_and_exponent();
     debug_assert_eq!(0, exp);
 
     let multiples_of_pi_mod_two: BigInt = &multiples_of_pi % 2;
@@ -121,7 +125,7 @@ pub fn sin(mut x: BigDecimal) -> BigDecimal {
         x = &*PI - x;
     }
 
-    let val = if &x> &*PI_OVER_FOUR {
+    let val = if &x > &*PI_OVER_FOUR {
         cos_restricted(&*PI_OVER_TWO - &x)
     } else {
         sin_restricted(x)
@@ -134,8 +138,10 @@ pub fn sin(mut x: BigDecimal) -> BigDecimal {
     }
 }
 
-
 #[test]
 fn test_sin() {
-    assert_eq!("0.19260484050094251300", sin("114514".parse().unwrap()).round(20).to_string());
+    assert_eq!(
+        "0.19260484050094251300",
+        sin("114514".parse().unwrap()).round(20).to_string()
+    );
 }

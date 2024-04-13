@@ -2,63 +2,59 @@ use core::fmt;
 use std::convert::Infallible;
 use std::ops::{Add, Mul, Neg, Sub};
 
-use bigdecimal::num_bigint::BigInt;
-use bigdecimal::BigDecimal;
 use chumsky::prelude::*;
-use num_rational::BigRational;
+use rug::float::Round;
+use rug::ops::{CompleteRound, DivAssignRound};
+use rug::{Complete, Float, Integer, Rational};
 
 use crate::div::CheckedDiv;
 
 mod print;
-mod trig;
+// mod trig;
 
 pub enum Value {
-    Exact(BigRational),
-    Decimal(BigDecimal),
+    Exact(Rational),
+    Decimal(Float),
 }
 
 fn perform_op<E>(
     a: Value,
     b: Value,
-    do_exact: fn(BigRational, BigRational) -> Result<BigRational, E>,
-    do_decimal: fn(BigDecimal, BigDecimal) -> Result<BigDecimal, E>,
+    do_exact: fn(Rational, Rational) -> Result<Rational, E>,
+    do_decimal: fn(Float, Float, &Evaluator) -> Result<Float, E>,
+    evaluator: &Evaluator,
 ) -> Result<Value, E> {
-    let conv = |x: BigRational| {
-        let (numer, denom) = x.into();
-        BigDecimal::new(numer, 0) / BigDecimal::new(denom, 0)
+    let conv = |x: Rational| {
+        Float::with_val_round(evaluator.precision(), x, evaluator.round()).0
     };
     match (a, b) {
         (Value::Exact(a), Value::Exact(b)) => do_exact(a, b).map(Value::Exact),
-        (Value::Decimal(a), Value::Exact(b)) => do_decimal(a, conv(b)).map(Value::Decimal),
-        (Value::Exact(a), Value::Decimal(b)) => do_decimal(conv(a), b).map(Value::Decimal),
-        (Value::Decimal(a), Value::Decimal(b)) => do_decimal(a, b).map(Value::Decimal),
+        (Value::Decimal(a), Value::Exact(b)) => do_decimal(a, conv(b), evaluator).map(Value::Decimal),
+        (Value::Exact(a), Value::Decimal(b)) => do_decimal(conv(a), b, evaluator).map(Value::Decimal),
+        (Value::Decimal(a), Value::Decimal(b)) => do_decimal(a, b, evaluator).map(Value::Decimal),
     }
 }
 
-macro_rules! binop_impl {
-    (impl $Tr:ident for Value via $name:ident($op:tt)) => {
-        impl $Tr for Value {
-            type Output = Value;
-            fn $name(self, rhs: Value) -> Value {
-                perform_op::<Infallible>(self, rhs, |a, b| Ok(a $op b), |a, b| Ok(a $op b)).unwrap_or_else(|e| match e {})
+macro_rules! op_impl {
+    ($name:ident($op:tt)) => {
+        fn $name(self, other: Value, e: &Evaluator) -> Value {
+            match perform_op::<Infallible>(self, other, |a, b| Ok(a $op b), |a, b, _| Ok(a $op b), e) {
+                Ok(x) => x,
+                Err(e) => match e {}
             }
         }
     };
 }
 
-binop_impl!(impl Add for Value via add(+));
-binop_impl!(impl Sub for Value via sub(-));
-binop_impl!(impl Mul for Value via mul(*));
-
-impl CheckedDiv for Value {
-    type Target = Value;
-    fn checked_div(self, other: Self) -> Result<Self::Target, crate::div::DivisionByZero> {
-        perform_op(
-            self,
-            other,
-            CheckedDiv::checked_div,
-            CheckedDiv::checked_div,
-        )
+impl Value {
+    op_impl!(add(+));
+    op_impl!(sub(-));
+    op_impl!(mul(*));
+    fn div(self, other: Value, evaluator: &Evaluator) -> Result<Value, crate::div::DivisionByZero> {
+        perform_op(self, other, CheckedDiv::checked_div, |mut a, b, e| {
+            a.div_assign_round(b, e.round());
+            Ok(a)
+        }, evaluator)
     }
 }
 
@@ -82,6 +78,97 @@ impl fmt::Display for Value {
     }
 }
 
+pub enum PrecisionMode {
+    Decent,
+}
+
+impl PrecisionMode {
+    fn precision(&self) -> u32 {
+        match self {
+            PrecisionMode::Decent => 100,
+        }
+    }
+}
+
+pub struct Evaluator {
+    precision: PrecisionMode,
+}
+
+impl Default for Evaluator {
+    fn default() -> Self {
+        Evaluator { precision: PrecisionMode::Decent }
+    }
+}
+
+impl Evaluator {
+    fn round(&self) -> Round {
+        Round::Nearest
+    }
+    fn precision(&self) -> u32 {
+        self.precision.precision()
+    }
+    fn complete<C: CompleteRound<Prec = u32, Round = Round>>(&self, c: C) -> C::Completed {
+        c.complete_round(self.precision(), self.round()).0
+    }
+    // evaluate a binary operation implemented numerically.
+    fn eval_binop(
+        &mut self,
+        a: Expr,
+        b: Expr,
+        numerical: fn(Value, Value, &mut Evaluator) -> color_eyre::Result<Value>,
+        fallback: fn(Expr, Expr) -> Expr,
+    ) -> color_eyre::Result<Expr> {
+        match (self.eval(a)?, self.eval(b)?) {
+            (Expr::Value(a), Expr::Value(b)) => numerical(a, b, self).map(Expr::Value),
+            (a, b) => Ok(fallback(a, b)),
+        }
+    }
+
+    pub fn eval(&mut self, e: Expr) -> color_eyre::Result<Expr> {
+        Ok(match e {
+            Expr::Value(val) => Expr::Value(val),
+            Expr::Symbol(s) => Expr::Symbol(s),
+            Expr::Add(values) => {
+                let (a, b) = *values;
+                self.eval_binop(a, b, |a, b, e| Ok(a.add(b, &*e)), |a, b| Expr::Add(Box::new((a, b))))?
+            }
+            Expr::Sub(values) => {
+                let (a, b) = *values;
+                self.eval_binop(a, b, |a, b, e| Ok(a.sub(b, &*e)), |a, b| Expr::Sub(Box::new((a, b))))?
+            }
+            Expr::Mul(values) => {
+                let (a, b) = *values;
+                self.eval_binop(a, b, |a, b, e| Ok(a.mul(b, &*e)), |a, b| Expr::Mul(Box::new((a, b))))?
+            }
+            Expr::Div(values) => {
+                let (a, b) = *values;
+                self.eval_binop(
+                    a,
+                    b,
+                    |a, b, e| a.div(b, &*e).map_err(Into::into),
+                    |a, b| Expr::Div(Box::new((a, b))),
+                )?
+            }
+            Expr::Neg(neg) => match self.eval(*neg)? {
+                Expr::Value(v) => Expr::Value(-v),
+                other => Expr::Neg(Box::new(other)),
+            },
+            Expr::Apply(left, args) => match self.eval(*left)? {
+                Expr::Symbol(n) if n == "sin" && args.len() == 1 => {
+                    let arg = args.into_iter().next().unwrap();
+                    match self.eval(arg)? {
+                        Expr::Value(Value::Decimal(mut d)) => Expr::Value(Value::Decimal({
+                            d.sin_round(self.round()); d
+                        })),
+                        _ => todo!(),
+                    }
+                }
+                _ => todo!(),
+            },
+        })
+    }
+}
+
 pub enum Expr {
     Value(Value),
     Symbol(String),
@@ -93,62 +180,7 @@ pub enum Expr {
     Apply(Box<Expr>, Vec<Expr>),
 }
 
-impl Expr {
-    fn eval_binop(
-        a: Expr,
-        b: Expr,
-        numerical: fn(Value, Value) -> color_eyre::Result<Value>,
-        fallback: fn(Expr, Expr) -> Expr,
-    ) -> color_eyre::Result<Expr> {
-        match (a.eval()?, b.eval()?) {
-            (Expr::Value(a), Expr::Value(b)) => numerical(a, b).map(Expr::Value),
-            (a, b) => Ok(fallback(a, b)),
-        }
-    }
-    pub fn eval(self) -> color_eyre::Result<Expr> {
-        Ok(match self {
-            Expr::Value(val) => Expr::Value(val),
-            Expr::Symbol(s) => Expr::Symbol(s),
-            Expr::Add(values) => {
-                let (a, b) = *values;
-                Self::eval_binop(a, b, |a, b| Ok(a + b), |a, b| Expr::Add(Box::new((a, b))))?
-            }
-            Expr::Sub(values) => {
-                let (a, b) = *values;
-                Self::eval_binop(a, b, |a, b| Ok(a - b), |a, b| Expr::Sub(Box::new((a, b))))?
-            }
-            Expr::Mul(values) => {
-                let (a, b) = *values;
-                Self::eval_binop(a, b, |a, b| Ok(a * b), |a, b| Expr::Mul(Box::new((a, b))))?
-            }
-            Expr::Div(values) => {
-                let (a, b) = *values;
-                Self::eval_binop(
-                    a,
-                    b,
-                    |a, b| a.checked_div(b).map_err(Into::into),
-                    |a, b| Expr::Div(Box::new((a, b))),
-                )?
-            }
-            Expr::Neg(neg) => match neg.eval()? {
-                Expr::Value(v) => Expr::Value(-v),
-                other => Expr::Neg(Box::new(other)),
-            },
-            Expr::Apply(left, args) => match left.eval()? {
-                Expr::Symbol(n) if n == "sin" && args.len() == 1 => {
-                    let arg = args.into_iter().next().unwrap();
-                    match arg.eval()? {
-                        Expr::Value(Value::Decimal(d)) => Expr::Value(Value::Decimal(trig::sin(d))),
-                        _ => todo!(),
-                    }
-                }
-                _ => todo!(),
-            },
-        })
-    }
-}
-
-pub fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> {
+pub fn expr_parser(e: &Evaluator) -> impl Parser<char, Expr, Error = Simple<char>> + '_ {
     let expr = recursive(|expr| {
         let int = text::int(10)
             .then(just('.').ignore_then(text::digits(10).or_not()).or_not())
@@ -165,15 +197,11 @@ pub fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> {
                             s.push('e');
                             s.push_str(&exp);
                         }
-                        s.parse::<BigDecimal>()
-                            .map_err(|e| Simple::custom(span, e.to_string()))?
+                        let f = Float::parse(s).map_err(|e| Simple::custom(span, e.to_string()))?;
+                        e.complete(f)
                     })
                 } else {
-                    Value::Exact(BigRational::new(
-                        int.parse::<BigInt>()
-                            .map_err(|e| Simple::custom(span, e.to_string()))?,
-                        1.into(),
-                    ))
+                    Value::Exact(Integer::parse(int).map_err(|e| Simple::custom(span, e.to_string()))?.complete().into())
                 }))
             })
             .padded();

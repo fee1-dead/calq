@@ -1,8 +1,9 @@
 use std::error::Error;
 use std::fmt::Display;
 
-use bigdecimal::BigDecimal;
-use num_rational::BigRational;
+use rug::{Float, Rational};
+
+
 
 #[derive(Debug, Default)]
 pub struct DivisionByZero;
@@ -21,11 +22,11 @@ pub trait CheckedDiv<T = Self> {
 }
 
 macro_rules! impl_checked_div {
-    ($($t:ty),*$(,)?) => {$(
+    ($($t:ty = $zero: expr),*$(,)?) => {$(
         impl CheckedDiv for $t {
             type Target = $t;
             fn checked_div(self, other: Self) -> Result<Self::Target, DivisionByZero> {
-                if other == Default::default() {
+                if other == $zero {
                     Err(DivisionByZero)
                 } else {
                     Ok(self / other)
@@ -35,4 +36,4 @@ macro_rules! impl_checked_div {
     )*};
 }
 
-impl_checked_div!(BigRational, BigDecimal);
+impl_checked_div!(Rational = *Rational::ZERO, Float = Float::new(1));

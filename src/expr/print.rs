@@ -1,6 +1,6 @@
 use std::fmt::{self, Write};
 
-use super::{Expr, PrecedenceContext};
+use super::{Expr, PrecedenceContext, Value};
 
 /* pub fn print_expr_to_string(x: &Expr) -> String {
     let mut p = Printer::new_string();
@@ -10,12 +10,17 @@ use super::{Expr, PrecedenceContext};
 
 impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Printer { writer: f }.print(self)
+        Printer {
+            writer: f,
+            round_digits: 8,
+        }
+        .print(self)
     }
 }
 
 pub struct Printer<W: Write> {
     writer: W,
+    round_digits: i64,
 }
 
 /*
@@ -169,9 +174,14 @@ impl<W: Write> Printer<W> {
                 self.print_with_precedence(x, new_ctxt)?;
                 write!(self.writer, "!")?;
             }*/
-            Expr::Value(x) => {
-                write!(self.writer, "{x}")?;
-            }
+            Expr::Value(x) => match x {
+                Value::Decimal(dec) => {
+                    write!(self.writer, "{dec}")?;
+                }
+                Value::Exact(e) => {
+                    write!(self.writer, "{e}")?;
+                }
+            },
             Expr::Symbol(x) => {
                 self.writer.write_str(x)?;
             }
@@ -184,7 +194,7 @@ impl<W: Write> Printer<W> {
                     Expr::Add(_) => "+",
                     Expr::Mul(_) => "*",
                     Expr::Div(_) => "/",
-                    Expr::Sub(_) => "_",
+                    Expr::Sub(_) => "-",
                     _ => unreachable!(),
                 };
 
