@@ -20,7 +20,7 @@ impl fmt::Display for Expr {
 
 pub struct Printer<W: Write> {
     writer: W,
-    round_digits: i64,
+    round_digits: usize,
 }
 
 /*
@@ -176,7 +176,33 @@ impl<W: Write> Printer<W> {
             }*/
             Expr::Value(x) => match x {
                 Value::Decimal(dec) => {
-                    write!(self.writer, "{dec}")?;
+                    let (sign, mut string, exp) = dec.to_sign_string_exp(10, Some(self.round_digits));
+                    let sign = if sign {
+                        ""
+                    } else {
+                        "-"
+                    };
+                    let exp = exp.map(|x| x - 1);
+                    let (prefix, string, suffix, suffix2) = match exp {
+                        Some(exp @ ..=-4) => {
+                            let rest = string.split_off(1);
+                            (string, ".".into(), rest, format!("e{exp}"))
+                        }
+                        Some(exp @ -5..=-1) => {
+                            (format!("0.{}", "0".repeat((-exp - 1) as usize)), string, String::new(), String::new())
+                        }
+                        Some(0) => {
+                            let rest = string.split_off(1);
+                            (string, ".".into(), rest, String::new())
+                        }
+                        // TODO fix below, that doesn't work!!
+                        Some(exp @ 1..) => {
+                            (String::new(), string, "0".repeat(exp as usize), String::new())
+                        }
+                        None => (String::new(), string, String::new(), String::new()),
+                    };
+                    
+                    write!(self.writer, "{sign}{prefix}{string}{suffix}{suffix2}")?;
                 }
                 Value::Exact(e) => {
                     write!(self.writer, "{e}")?;
