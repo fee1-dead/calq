@@ -195,7 +195,7 @@ impl<W: Write> Printer<W> {
                             let rest = string.split_off(1);
                             (string, ".".into(), rest, String::new())
                         }
-                        // TODO fix below, that doesn't work!!
+                        // TODO fix below, that doesn't work!
                         Some(exp @ 1..) => {
                             (String::new(), string, "0".repeat(exp as usize), String::new())
                         }
